@@ -1,0 +1,65 @@
+import pandas as pd
+import yfinance as yf
+import matplotlib.pyplot as plt
+
+# --- CONFIGURATIONS ---
+short_window = 30
+long_window = 60
+show_signals = True
+plot_raw = False
+symbol = "BTC-USD"
+
+# --- FETCH DATA ---
+# Fetch BTC-USD price as proxy, real hashrate data would need API like Glassnode/IntoTheBlock
+df = yf.download(symbol, interval="1d", start="2011-01-01")
+df = df[['Close']]
+df.dropna(inplace=True)
+
+# --- SIMULATE HASHRATE (EXAMPLE) ---
+# In practice, replace this with actual hashrate data
+df['HR_raw'] = df['Close'] * 1000  # Fake proxy
+
+# --- CALCULATE HASHRATE SMAs ---
+df['HR_short'] = df['HR_raw'].rolling(window=short_window).mean()
+df['HR_long'] = df['HR_raw'].rolling(window=long_window).mean()
+
+# --- CALCULATE SMA PRICE CROSS FOR BUY SIGNAL ---
+df['s10'] = df['Close'].rolling(10).mean()
+df['s20'] = df['Close'].rolling(20).mean()
+
+# --- LOGIC CONDITIONS ---
+df['capitulation'] = (df['HR_short'] < df['HR_long']) & (df['HR_short'].shift(1) >= df['HR_long'].shift(1))
+df['miner_capitulation'] = df['HR_short'] < df['HR_long']
+df['recovering'] = (
+    df['HR_short'] > df['HR_short'].shift(1)) & \
+    (df['HR_short'] > df['HR_short'].shift(2)) & \
+    (df['HR_short'] > df['HR_short'].shift(3)) & \
+    (df['miner_capitulation'])
+
+df['recovered'] = (df['HR_short'] > df['HR_long']) & (df['HR_short'].shift(1) <= df['HR_long'].shift(1))
+
+# --- BUY SIGNAL ---
+# Simplified version of Pine logic
+df['buy_signal'] = (
+    (df['s10'] > df['s20']) & df['recovered']
+) & ~df['buy_signal'].shift(1).fillna(False)
+
+# --- PLOTTING ---
+plt.figure(figsize=(16, 8))
+
+plt.plot(df.index, df['HR_short'], label="HR Short", color='lime')
+plt.plot(df.index, df['HR_long'], label="HR Long", color='gray')
+if plot_raw:
+    plt.plot(df.index, df['HR_raw'], label="HR Raw", color='green', alpha=0.4)
+
+if show_signals:
+    plt.scatter(df.index[df['capitulation']], df['HR_short'][df['capitulation']], label='Capitulation', color='gray')
+    plt.scatter(df.index[df['recovered']], df['HR_short'][df['recovered']], label='Recovered', color='lime')
+    plt.scatter(df.index[df['buy_signal']], df['HR_short'][df['buy_signal']], label='Buy', color='blue')
+
+plt.legend()
+plt.title("Hash Ribbons (Python Version)")
+plt.xlabel("Date")
+plt.ylabel("Hashrate Proxy")
+plt.grid(True)
+plt.show()
